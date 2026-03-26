@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Com networkSecurityConfig, usesCleartextTraffic no manifest é ignorado.
+     Sem cleartext no base-config, só hosts nomeados em <domain-config> funcionam em HTTP/WS;
+     IP LAN (192.168.*) não casa e o aparelho físico bloqueia ws:// — parece “não conecta”. -->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.2.2</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>

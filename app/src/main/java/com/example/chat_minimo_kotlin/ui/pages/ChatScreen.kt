@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -47,6 +48,7 @@ fun ChatScreen(
     sessionLoading: Boolean = false,
     sessionError: String? = null,
     onSendMessage: (Map<String, Any?>) -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -84,6 +86,16 @@ fun ChatScreen(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Filled.ArrowBack,
+                                contentDescription = "Voltar",
+                            )
+                        }
                     }
                 },
             )

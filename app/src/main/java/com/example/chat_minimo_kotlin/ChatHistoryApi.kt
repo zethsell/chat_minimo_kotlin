@@ -15,7 +15,7 @@ object ChatHistoryApi {
     ): List<Map<String, Any?>> {
         val base = baseUrl.trimEnd('/')
         val req = Request.Builder()
-            .url("$base/chats/$chatId/messages")
+            .url("$base/chat/sessoes/$chatId/messages")
             .get()
             .build()
         client.newCall(req).execute().use { resp ->

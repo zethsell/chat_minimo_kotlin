@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">chat_minimo_kotlin</string>
+    <!-- Carteiro: SEMPRE o BFF operacional (/chat/... e /ws). Nunca message-server-api (:9641). -->
+    <string name="chat_bff_base_url" translatable="false">http://10.0.2.2:9090</string>
 </resources>

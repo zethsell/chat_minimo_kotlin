@@ -12,8 +12,9 @@ object ChatSessionBootstrap {
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     /**
-     * Resolve sessão em `POST /chats/historico` ou cria com `POST /chats`.
-     * [idCorreios] = identificação do cidadão na sessão; [carteiroId] opcional (matrícula).
+     * Uso **carteiro** (após LOEC + idCorreios resolvido): `POST /chat/historico` e reutiliza só sessão **ativa**
+     * (não `RESOLVIDO` / `ARQUIVADO` / `FECHADO`); se não houver, `POST /chat/sessoes`.
+     * O app cidadão não deve depender deste fluxo para abrir atendimento.
      */
     fun ensureChatId(
         client: OkHttpClient,
@@ -22,16 +23,18 @@ object ChatSessionBootstrap {
         idCorreios: String,
         codigosObjeto: List<String>,
         carteiroId: String?,
+        historicoPorCarteiro: Boolean = false,
     ): String {
         val base = baseUrl.trimEnd('/')
-        val historicoJson = gson.toJson(
-            mapOf(
-                "idCorreios" to idCorreios,
-                "codigosObjeto" to codigosObjeto,
-            ),
-        )
+        val historicoBody = mutableMapOf<String, Any>("codigosObjeto" to codigosObjeto)
+        if (historicoPorCarteiro && !carteiroId.isNullOrBlank()) {
+            historicoBody["carteiroId"] = carteiroId.trim()
+        } else {
+            historicoBody["idCorreios"] = idCorreios
+        }
+        val historicoJson = gson.toJson(historicoBody)
         val histRequest = Request.Builder()
-            .url("$base/chats/historico")
+            .url("$base/chat/historico")
             .post(historicoJson.toRequestBody(jsonMedia))
             .build()
         client.newCall(histRequest).execute().use { resp ->
@@ -39,10 +42,8 @@ object ChatSessionBootstrap {
                 error("historico HTTP ${resp.code}: ${resp.body?.string()}")
             }
             val body = resp.body?.string().orEmpty()
-            val listType = object : TypeToken<List<Map<String, Any?>>>() {}.type
-            val arr: List<Map<String, Any?>> = gson.fromJson(body, listType) ?: emptyList()
-            val firstId = arr.firstOrNull()?.get("id")?.toString()
-            if (firstId != null) return firstId
+            val openId = parseHistoricoFirstOpenChatId(body, gson)
+            if (openId != null) return openId
         }
 
         val createPayload = mutableMapOf<String, Any?>(
@@ -53,7 +54,7 @@ object ChatSessionBootstrap {
             createPayload["carteiroId"] = carteiroId.trim()
         }
         val createRequest = Request.Builder()
-            .url("$base/chats")
+            .url("$base/chat/sessoes")
             .post(gson.toJson(createPayload).toRequestBody(jsonMedia))
             .build()
         client.newCall(createRequest).execute().use { resp ->
@@ -63,8 +64,44 @@ object ChatSessionBootstrap {
             val body = resp.body?.string().orEmpty()
             val mapType = object : TypeToken<Map<String, Any?>>() {}.type
             val map: Map<String, Any?> = gson.fromJson(body, mapType)
-                ?: error("POST /chats: corpo vazio")
-            return map["id"]?.toString() ?: error("POST /chats sem id")
+                ?: error("POST /chat/sessoes: corpo vazio")
+            return map["id"]?.toString() ?: error("POST /chat/sessoes sem id")
         }
+    }
+
+    /**
+     * Primeiro chat **ainda iterável** (aba Ativos): exclui `RESOLVIDO`, `ARQUIVADO`, `FECHADO`.
+     * Se só existir histórico encerrado, retorna `null` e o fluxo cria sessão nova.
+     */
+    private fun parseHistoricoFirstOpenChatId(body: String, gson: Gson): String? {
+        for (m in parseHistoricoRows(body, gson)) {
+            if (!isOpenForNovaConversa(m)) continue
+            val id = m["id"]?.toString()?.trim().orEmpty()
+            if (id.isNotEmpty()) return id
+        }
+        return null
+    }
+
+    private fun parseHistoricoRows(body: String, gson: Gson): List<Map<String, Any?>> {
+        val trimmed = body.trimStart()
+        if (trimmed.startsWith("[")) {
+            val listType = object : TypeToken<List<Map<String, Any?>>>() {}.type
+            return gson.fromJson(body, listType) ?: emptyList()
+        }
+        if (trimmed.startsWith("{")) {
+            val mapType = object : TypeToken<Map<String, Any?>>() {}.type
+            val root: Map<String, Any?> = gson.fromJson(body, mapType) ?: return emptyList()
+            val contentAny = root["content"] ?: return emptyList()
+            if (contentAny !is List<*>) return emptyList()
+            @Suppress("UNCHECKED_CAST")
+            return contentAny.mapNotNull { it as? Map<String, Any?> }
+        }
+        return emptyList()
+    }
+
+    private fun isOpenForNovaConversa(row: Map<String, Any?>): Boolean {
+        val st = row["status"]?.toString()?.trim().orEmpty()
+        if (st.isEmpty()) return true
+        return !ChatStatusBuckets.isHistorico(st)
     }
 }
