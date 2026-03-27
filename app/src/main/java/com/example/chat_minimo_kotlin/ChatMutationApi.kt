@@ -34,6 +34,7 @@ object ChatMutationApi {
         val req =
             Request.Builder()
                 .url("${baseUrl.trimEnd('/')}/chat/sessoes/$chatId/messages")
+                .header("Accept", "application/json")
                 .post(body.toRequestBody(jsonMedia))
                 .build()
         client.newCall(req).execute().use { return it.isSuccessful }
@@ -59,6 +60,7 @@ object ChatMutationApi {
         val req =
             Request.Builder()
                 .url("${baseUrl.trimEnd('/')}/chat/sessoes/$chatId/delivery-status")
+                .header("Accept", "application/json")
                 .post(body.toRequestBody(jsonMedia))
                 .build()
         client.newCall(req).execute().use { resp ->
