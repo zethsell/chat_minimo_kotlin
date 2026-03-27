@@ -85,7 +85,10 @@ object ChatMutationApi {
             .build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
-                throw IllegalStateException("markAllRead HTTP ${resp.code}")
+                val detail = resp.body?.string()?.trim()?.take(500) ?: ""
+                throw IllegalStateException(
+                    "markAllRead HTTP ${resp.code}${if (detail.isNotEmpty()) ": $detail" else ""}",
+                )
             }
         }
     }
