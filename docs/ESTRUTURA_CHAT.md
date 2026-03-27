@@ -1,186 +1,214 @@
-# Documento técnico — estrutura do chat (estado atual)
+# Documento técnico — estrutura do chat (arquitetura v3 + coexistência)
 
-Este texto descreve a arquitetura do chat de demonstração usada nos projetos **chat_minimo** (Android/Kotlin), **chat_minimo_flutter**, **message-server** (WebSocket e roteamento) e **message-server-api** (REST e persistência). Os caminhos de código citados são relativos a cada repositório.
+Este texto descreve o **estado alvo (Refactor Spec v3)**: **SSE + Redis** na **message-server-api**, envio **REST**, e **BFF operacional** / **proxyapp** como únicos HTTP para os apps. Inclui ainda o **legado** (**message-server** WebSocket) enquanto a migração não encerra.
 
----
-
-## 1. Visão geral
-
-### 1.0 Fluxo operacional de teste (evolução para produção)
-
-Ordem esperada no negócio:
-
-1. **Carga de contexto LOEC** (tela / fluxo operacional do carteiro, fora destes demos mínimos).
-2. **Resolução do idCorreios a partir do objeto** (rastreamento / serviços Correios — ainda não acoplado aos apps demo; hoje os IDs são fixos).
-3. **App do carteiro** (`chat_minimo` Kotlin): cria ou resolve sessão via API quando necessário e envia a **primeira mensagem** no WebSocket.
-4. **App do cidadão** (`chat_minimo_flutter`): **não** chama `POST /chat/sessoes` para abrir atendimento; só consome **lista** (`POST .../historico` por idCorreios) e abre conversas **já existentes** pela lista. Respostas e leitura seguem o fluxo atual (WS + `markAllRead` opcional).
-
-Os demos mantêm `codigosObjeto` e IDs hardcoded até existir integração real com LOEC e lookup por objeto.
+Detalhamento de checklist e fases: [`PLANO_REFATORACAO_CHAT_V3.md`](./PLANO_REFATORACAO_CHAT_V3.md).
 
 ---
 
-O chat combina dois canais:
+## 1. Visão geral (v3)
 
-| Canal | Responsável | Função |
-|--------|-------------|--------|
-| **REST** | `message-server-api` | Criar/resolver sessão de chat (`chatId`), listar histórico persistido |
-| **WebSocket** | `message-server` | Mensagens em tempo quase real, confirmações de entrega/leitura (`messageStatus`), heartbeat |
+### 1.1 Fluxo operacional de teste
 
-A persistência assíncrona das mensagens que passam pelo roteador ocorre via fila **RabbitMQ** (`chat.in`), consumida pela API/camada de dados (Mongo).
+1. **LOEC** e resolução **idCorreios** por objeto (fora dos demos; IDs ainda fixos nos apps).
+2. **Carteiro** (`chat_minimo` Kotlin): cria / resolve sessão via **BFF** (`POST /chat/sessoes` → `/chats`) e conversa.
+3. **Cidadão** (`chat_minimo_flutter`): **não** abre atendimento com `POST /chat/sessoes`; lista com **`POST /chat/historico`** e abre chats existentes.
+
+### 1.2 Topologia alvo
+
+| Camada | Papel |
+|--------|--------|
+| **Tempo real** | **SSE** `GET /sse/stream?userId=` (via BFF `:9090` ou **proxyapp** `:9091`) |
+| **Envio** | **REST** `POST .../chat/sessoes/{id}/messages` (+ `delivery-status` para recibos) |
+| **API** | **message-server-api** persiste, publica **Rabbit `chat.in`**, **Redis** `chat.events.{userId}` |
+| **Dados** | **MongoDB** (`chats`, `messages`), índices nas entidades |
 
 ```mermaid
-flowchart TB
-  subgraph clients["Clientes demo"]
-    Kotlin["chat_minimo\n(carteiro → BFF :9090)"]
-    Flutter["chat_minimo_flutter\n(cidadão → proxyapp :9091)"]
+flowchart LR
+  subgraph clients
+    K[chat_minimo Kotlin]
+    F[chat_minimo_flutter]
   end
-  API["message-server-api\nREST /chats"]
-  MS["message-server\n/ws"]
-  RMQ["RabbitMQ chat.in"]
-  Mongo[("Mongo / domínio chat")]
+  subgraph edge
+    BFF[BFF operacional :9090]
+    PX[proxyapp :9091]
+  end
+  API[message-server-api]
+  R[(Redis pub/sub)]
+  M[(MongoDB)]
+  Q[RabbitMQ]
 
-  Kotlin --> API
-  Flutter --> API
-  Kotlin --> MS
-  Flutter --> MS
-  MS --> RMQ
-  RMQ --> Mongo
-  API --> Mongo
+  K --> BFF
+  F --> PX
+  BFF --> API
+  PX --> API
+  API --> R
+  API --> M
+  Q --> API
 ```
 
----
+### 1.3 Stack local mínima (sem `message_server`)
 
-## 2. message-server (WebSocket e roteamento)
+Para testar só **v3** com os demos atuais (SSE + REST):
 
-- **Protocolo:** WebSocket reativo (Spring WebFlux), **sem** STOMP/SockJS.
-- **Endpoint:** `GET /ws?userId=<id>` — o parâmetro `userId` é obrigatório no handshake; sem ele a conexão é encerrada.
-- **Saída:** stream por usuário com merge de eventos; inclui heartbeat periódico **`{"type":"PONG"}`** (~20 s).
-
-### 2.1 Roteamento (`MessageRouterService`)
-
-1. Texto recebido no socket é interpretado como JSON.
-2. Se for **`messageStatus`**, o destino vem de `targetUserId` ou fallback em `receiver`; o servidor encaminha o status ao peer adequado.
-3. Caso contrário, o payload é parseado como mensagem de chat; o `sender` pode ser preenchido com o `userId` da sessão WebSocket se vier vazio.
-4. Entrega: tenta **`SessionManager.emitIfConnected(receiver, payload)`**; se não houver sessão para o `receiver` lógico, resolve um **gateway** sintético e tenta entregar a **`__gateway__:<id>`**.
-
-**Gateways (configuráveis, valores típicos em local):**
-
-- Prefixos em `app.chat.gateway-bff-receiver-prefixes` (padrão histórico: `matricula`) → encaminhar para **`__gateway__` + `gateway-bff-id`** (ex.: BFF operacional).
-- Demais receivers → **`__gateway__` + `gateway-proxy-id`** (ex.: **proxyapp** no fluxo cidadão).
-
-O perfil Spring **`local,bffunified`** (arquivo `application-bffunified.yaml` no `message-server`) pode expandir prefixos para **`matricula,idCorreios`** quando nativo e Flutter devem usar o **mesmo** WebSocket do BFF (e não o proxy).
-
-Após entrega bem-sucedida, se a mensagem trouxer `msgId`, `chatId` e `sender`, o servidor pode emitir **`messageStatus`** com **`RECEBIDA`** de volta ao remetente e publicar isso na fila de persistência.
-
-**Importante:** neste repositório **não** existem controllers HTTP de chat; apenas WebSocket + fila.
+1. **message-server-api** com perfil `local` + Mongo, Rabbit e **Redis** (ver §11 para `REDIS_HOST` / `REDIS_PORT`).
+2. **BFF** (`:9090`) e/ou **proxyapp** (`:9091`): em `application-local` ficam **`app.websocket.enabled: false`** e **`app.websocket.gateway.enabled: false`** — não é necessário o hub WebSocket na porta **8081**.
+3. Para legado WS + hub, repor `enabled: true` nos mesmos blocos e subir o **`message_server`**.
 
 ---
 
-## 3. message-server-api (REST)
+## 2. message-server-api
 
-Base típica **no servidor** (processo JVM da API): **`http://<host>:9641`**.  
-**Apps Android/Flutter não chamam essa porta:** cidadão usa **proxyapp** (`:9091`); carteiro (Kotlin) usa **BFF** (`:9090`), e só o BFF/proxy encaminham para a API.
-
-### 3.1 Endpoints principais (`ChatSessionController`, prefixo `/chats`)
-
-| Método | Caminho | Uso no demo |
-|--------|---------|-------------|
-| `POST` | `/chats/historico` | `idCorreios` **ou** `carteiroId` + `codigosObjeto` — cidadão por idCorreios; carteiro por matrícula |
-| `POST` | `/chats` | Cria chat se o histórico não trouxer sessão aberta |
-| `GET` | `/chats/{id}/messages` | Carrega mensagens para popular a UI antes/paralelo ao WS |
-
-Há também rotas legadas sob `/chat/...` em `ChatController` (histórico por usuários); o fluxo mínimo atual dos apps demo usa **`/chats/...`**.
+- **Base típica:** `http://<host>:9641` — apps **não** usam direto; só BFF/proxyapp.
+- **Tomcat:** `server.tomcat.threads.max: 200` no `application.yml` (uma thread por conexão SSE aberta).
+- **SSE:** `SseController` → `GET /sse/stream?userId=` → `ChatSseStreamService` assina Redis `chat.redis.channel-prefix` + `userId`.
+- **Mensagens REST:** `POST /chats/{id}/messages` → fila **`chat.in`**; catch-up `GET /chats/{id}/messages?since=&size=`.
+- **Recibos:** `POST /chats/{id}/delivery-status` → mesmo consumer (`messageStatus`).
+- **Domínio v3:** `chatId` determinístico, `POST /chats` upsert, `POST /chats/batch`, `GET /chats` com `participant` / paginação.
+- **Jobs:** `CorreiosEntregaCloseScheduler` (flag `app.chat.correios-entrega.scheduler.enabled`).
+- **Mongo:** coleções `chats` e `messages` (spec histórico chamava `chat_messages`; código usa `messages`, **`timestamp`** em ms e **`dominio`** denormalizado do chat para consultas por domínio).
 
 ---
 
-## 4. Cliente Android — chat_minimo (Kotlin)
+## 3. BFF operacional (`appoperacional-bff-main`)
 
-**Pacote:** `com.example.chat_minimo_kotlin`
-
-### 4.1 Organização
-
-| Arquivo / pasta | Papel |
-|-----------------|--------|
-| `MainActivity.kt` | Orquestra OkHttp, WebSocket, bootstrap e handlers |
-| `ChatSessionCache.kt` | Cache em memória (processo) da chave `(idCorreios, codigosObjeto ordenados, carteiroId)` → `chatId` |
-| `ChatSessionBootstrap.kt` | `POST /chat/historico` e, se necessário, `POST /chat/sessoes` no **BFF** (equivalente a `/chats/...` na API) |
-| `ChatHistoryApi.kt` | `GET /chat/sessoes/{id}/messages` no BFF + normalização de linhas |
-| `states/ChatState.kt` | Lista reativa de mensagens (`Map<String, Any?>`) para Compose |
-| `ui/pages/ChatScreen.kt`, `ChatBubble.kt` | UI |
-
-Não há data classes dedicadas: payloads são **`Map<String, Any?>`** serializados com **Gson**.
-
-### 4.2 Papéis no demo
-
-- **`userId`:** **carteiro** / matrícula — WebSocket, `markAllRead`, lista via `POST /chat/historico` com **`carteiroId`**.
-- **`idCorreiosCidadao`:** cidadão alvo no demo (peer na conversa); em produção viria da **busca por objeto** após LOEC.
-- **HTTP:** **BFF** `http://<host>:9090` (`/chat/...`). **WebSocket:** mesmo host, `ws://...:9090/ws?userId=<matrícula>`.
-
-### 4.3 Fluxo ao abrir a tela (lista → conversa)
-
-1. Lista: `POST /chat/historico` com `carteiroId` + `codigosObjeto`.
-2. Ao escolher um chat: `GET` mensagens por `chatId`; **não** há bootstrap cidadão — quem **cria** sessão no produto é o fluxo **carteiro** (futuro: após LOEC + idCorreios resolvido).
-3. WebSocket com reconexão (~3 s).
-
-### 4.4 Envio e recebimento (WebSocket)
-
-- **Enviar:** JSON do mapa da mensagem via `webSocket.send`; eco local na lista em caso de sucesso; linha de sistema em falha.
-- **Receber:** ignora `PONG`; atualiza `recebida`/`visualizada` por `msgId`+`chatId` em `messageStatus`; demais mensagens (não eco do próprio `userId`) são enriquecidas, anexadas ao estado e disparam ack **`VISUALIZADA`** uma vez por `msgId`.
+- **HTTP:** `ChatHistoryProxyController` em `/chat/...` → `/chats/...` na API (histórico, sessões, mensagens, `delivery-status`, lista).
+- **SSE:** `ChatSseProxyController` → `GET /sse/**` → `MessageServerSseMirror` (HttpURLConnection, **`X-Accel-Buffering: no`**).
+- **Config:** `app.messageserver-api.url`, `server.tomcat.threads.max` elevado para conexões SSE.
+- **Local v3:** WebSocket desligado no `application-local` — ver §1.3.
 
 ---
 
-## 5. Cliente Flutter — chat_minimo_flutter
+## 4. proxyapp (cidadão)
 
-**Entrada:** `lib/main.dart` instancia `ChatPage` com host derivado de `DEMO_HOST` ou plataforma (`10.0.2.2` no Android, `127.0.0.1` no desktop).
-
-### 5.1 Portas e papéis
-
-- **REST + WS:** `http(s)://<host>:9091` e `ws://<host>:9091` via **proxyapp** (cidadão não fala com a API na 9641).
-- **`userId`:** **idCorreios** (lista por cidadão, remetente nas mensagens do app cliente).
-- **`receiverId`:** matrícula do carteiro (`receiver` ao responder).
-- **`ChatPage`:** só carrega conversa com **`initialChatId`** vindo da lista; **não** chama `ensureOpenChatId` / criação de sessão (o cidadão não inicia o chat).
-
-### 5.2 Componentes
-
-| Arquivo | Papel |
-|---------|--------|
-| `chat_page.dart` | Estado da lista, bootstrap, integração com `WebSocketService` e `ChatHistoryApi` |
-| `chat_session_cache.dart` | Cache estático em memória por mesma chave composta do Kotlin |
-| Serviços (ex.: `web_socket_service`, `chat_history_api`) | Canal tempo real (`web_socket_channel`) e HTTP (`http`) |
-
-Reconexão WebSocket com fila de envio enquanto offline e atraso (~2 s) entre tentativas.
-
-### 5.3 Coerência com o roteamento
-
-Se o Flutter usar **proxy (9091)** e o `receiver` for `matricula_*`, o message-server tende a encaminhar ao gateway do **proxy**. Se usar **9090** com `receiver` `idCorreios_*`, as regras de prefixo no YAML determinam se o próximo salto é BFF ou proxy. Ajustar **`APP_CHAT_GATEWAY_BFF_RECEIVER_PREFIXES`** e o perfil **`bffunified`** conforme o cenário (ver comentários em `application-local.yaml` no `message-server`).
+- Mesmo padrão: **`ChatHistoryProxyController`** + **`ChatSseProxyController`** + **`MessageServerSseMirror`**.
+- **Tomcat:** `threads.max: 200` no `application.yaml` (conexões SSE bloqueiam thread).
+- **Segurança:** `/sse/**` liberado junto de `/ws/**` onde aplicável (`AppURLAuthorizer`).
+- **Local v3:** WebSocket desligado no `application-local` — ver §1.3.
 
 ---
 
-## 6. Contratos de mensagem (resumo)
+## 5. message-server — legado (WebSocket)
 
-Os clientes trabalham com JSON flexível (mapas). Campos frequentes em mensagens de chat:
+Permanece na migração para clientes ainda em **WS**:
 
-- `msgId`, `chatId`, `sender`, `receiver`, `content`, `timestamp`
-- Flags de UI / domínio: `recebida`, `visualizada` (podem ser atualizadas via `messageStatus`)
+- **Endpoint:** `GET /ws?userId=`.
+- **Papel:** roteamento e heartbeat; persistência continua via **Rabbit** para a API.
 
-**`messageStatus`:** tipo discriminador (ex.: `type: "messageStatus"`), `deliveryStatus` (ex.: `RECEBIDA`, `VISUALIZADA`), referência a `msgId`/`chatId` e alvo (`targetUserId` ou `receiver`).
+Quando o tráfego WS for zero (janela acordada), desligar conforme **Fase 6** do plano.
 
----
-
-## 7. Ferramentas auxiliares
-
-- **message-audit-panel** (Next.js): painel que pode consultar a API de auditoria (`ChatOutAuditController` e rotas proxy em `app/api/ms/...`) para inspecionar payloads — útil para depuração, não faz parte do runtime mínimo do chat no dispositivo.
+**Onde está o proxy WS hoje (para o corte):** BFF — `app.websocket` + pacote `service/chatws/`; proxyapp — idem + `/ws/**` em `AppURLAuthorizer`. Detalhes e ordem sugerida: [`PLANO_REFATORACAO_CHAT_V3.md`](./PLANO_REFATORACAO_CHAT_V3.md) § Fase 6 — *Referência para corte*.
 
 ---
 
-## 8. Limitações e observações do estado atual
+## 6. Cliente Android — `chat_minimo` (Kotlin)
 
-- **LOEC** e **lookup idCorreios por objeto** ainda não estão implementados nos demos; apenas documentados como fluxo alvo.
-- O **Kotlin** ainda não chama `POST /chat/sessoes` no `MainActivity` (lista + abrir chat existente); a criação explícita fica para quando integrar LOEC (ou via `ChatSessionBootstrap` em fluxo dedicado).
-- IDs, URLs e listas de objetos estão **fixos ou por define** nos demos; não há tela de configuração.
-- Cache de `chatId` é **só em memória**; reinício do app refaz bootstrap (histórico HTTP continua sendo buscado após resolver `chatId`).
-- O manifest do Android deve permitir rede (incl. **`INTERNET`**) e, em dev, cleartext conforme `networkSecurityConfig` / `usesCleartextTraffic`.
+| Peça | Descrição |
+|------|-----------|
+| **`SseManager`** | Único transporte tempo real no demo: OkHttp, `readTimeout(0)`, reconexão com backoff. |
+| **HTTP** | BFF `http://<host>:9090` — `ChatMutationApi` (POST mensagem, `delivery-status`), `ChatHistoryApi` (`since`/`size`). |
+| **Estado** | **`ChatViewModel`** (SSE + catch-up + envio) + singletons Compose (`ChatState` / `ChatSessionsState`). |
+
+Apps fora deste repo podem ainda usar WS até o corte operacional (plano § Fase 6).
 
 ---
 
-*Documento gerado com base na estrutura dos repositórios no workspace (março/2026). Ajuste portas, hosts e perfis Spring conforme o ambiente de deploy.*
+## 7. Cliente Flutter — `chat_minimo_flutter`
+
+| Peça | Descrição |
+|------|-----------|
+| **`SseService`** | Implementa **`ChatRealtimeService`**; único canal tempo real no demo. |
+| **HTTP** | **proxyapp** `http://<host>:9091` — `ChatHistoryApi` alinhado ao BFF. |
+| **Pacotes** | `http`, `uuid` (sem `web_socket_channel`). |
+| **Lista + conversa** | Mesmo **SSE** compartilhado (`sharedSocket`): ao sair da **`ChatPage`**, reinstala-se `onStreamOpen` na lista para **`POST /chat/historico`** após reconexão. |
+
+---
+
+## 8. Contratos de mensagem (resumo)
+
+- Chat: `msgId`, `chatId`, `sender`, `receiver`, `content`, `timestamp` / `timestampMillis` nos clients.
+- Eventos SSE: mesmo JSON que antes ia no WS (`chatUpdate`, `chatStatusChanged`, `messageStatus`, …).
+- **`messageStatus`:** também via REST `delivery-status` no modo v3.
+
+---
+
+## 9. Ferramentas auxiliares
+
+- **message-audit-panel:** auditoria / inspeção; não faz parte do runtime mínimo no dispositivo.
+
+---
+
+## 10. Validação rápida (SSE com curl)
+
+Substitua host/porta e `USER`. A API deve ter Redis e o stream registrado.
+
+**Direto na API:**
+
+```bash
+curl -N -H 'Accept: text/event-stream' \
+  'http://localhost:9641/sse/stream?userId=USER'
+```
+
+**Via BFF (carteiro, ex. 9090):**
+
+```bash
+curl -N -H 'Accept: text/event-stream' \
+  'http://localhost:9090/sse/stream?userId=USER'
+```
+
+**Via proxyapp (cidadão, ex. 9091):**
+
+```bash
+curl -N -H 'Accept: text/event-stream' \
+  'http://localhost:9091/sse/stream?userId=USER'
+```
+
+Verifique no primeiro chunk de resposta os headers desejados (ex.: **`X-Accel-Buffering: no`** no BFF/proxy). Publique um evento (ex.: mensagem de teste) e confira linhas `data:` no terminal.
+
+**Redis (manual):** use a mesma porta que a API (`REDIS_PORT`; perfil `local` assume **6379** se não definir env). Com o Redis só do `docker-compose` da API, a porta de host é **16379**.
+
+```bash
+redis-cli -p 6379 SUBSCRIBE 'chat.events.USER'
+# ou: redis-cli -p 16379 SUBSCRIBE 'chat.events.USER'
+```
+
+(publicar outra sessão com `PUBLISH` só para teste de conectividade — em produção a API publica após persistência.)
+
+**Health:** com a API em pé, `GET /actuator/health` inclui o indicador `redis` quando o broker responde. No perfil `local` o log mostra também `Redis PING ok` ao arranque.
+
+**Apps (checklist manual — Fase 4/5 do plano):**
+
+- **Reconexão SSE:** cortar/repor rede ou reiniciar API; conferir que a lista (Flutter) atualiza e que o chat aberto refaz catch-up (`since` ou histórico vazio).
+- **Kotlin:** mesma verificação (demo já em SSE-only).
+- **Reenvio:** modo SSE, simular falha no POST da mensagem e confirmar fila + drenagem ao reabrir o stream.
+
+---
+
+## 11. Redis em produção / K8s
+
+A API usa **`spring.data.redis`** com variáveis padrão Spring Boot (sobrescreva no deploy):
+
+| Propriedade / env | Exemplo |
+|-------------------|---------|
+| `REDIS_HOST` | host do serviço Redis |
+| `REDIS_PORT` | `6379` (ou porta interna do cluster) |
+| `REDIS_PASSWORD` | se o Redis exigir auth |
+
+Canal por usuário: `{chat.redis.channel-prefix}{userId}` (padrão `chat.events.`). Garantir que **todos os pods** da API vejam o **mesmo** Redis para pub/sub.
+
+**Desenvolvimento (`spring.profiles.active=local` na message-server-api):** `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` (default `localhost:6379`). Redis do `docker-compose.yml` da API expõe **16379** no host — nesse caso defina `REDIS_PORT=16379`.
+
+Exemplo de manifesto (`Secret` + `Deployment` com `envFrom`): repositório **message-server-api**, ficheiro [`docs/k8s-redis-env.example.yaml`](../../message-server-api/docs/k8s-redis-env.example.yaml).
+
+---
+
+## 12. Limitações e observações
+
+- Demos ainda usam IDs e URLs fixos / `--dart-define` / `strings.xml`.
+- **LOEC** e lookup real por objeto não estão nos apps mínimos.
+- Cache de `chatId` em memória; reinício do app refaz histórico HTTP.
+- Android: `INTERNET`, cleartext em dev conforme política de rede.
+
+---
+
+*Atualizado para refletir a arquitetura v3 (março/2026). Ajuste hosts, portas e perfis Spring conforme o deploy.*

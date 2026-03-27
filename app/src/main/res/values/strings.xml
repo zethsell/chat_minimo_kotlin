@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">chat_minimo_kotlin</string>
-    <!-- Carteiro: SEMPRE o BFF operacional (/chat/... e /ws). Nunca message-server-api (:9641). -->
+    <!-- Carteiro: BFF :9090 (/chat/... e /ws). Flutter cidadão usa proxyapp :9091 — mesmo contrato REST /chat/... -->
+    <!-- Se GET mensagens der 500 no BFF, redeploy BFF com fix Accept JSON; ou aponte para :9091 só para testar REST. -->
     <string name="chat_bff_base_url" translatable="false">http://10.0.2.2:9090</string>
 </resources>

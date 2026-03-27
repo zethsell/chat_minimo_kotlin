@@ -9,5 +9,5 @@ class ChatApplication : Application() {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    val wsManager: WebSocketManager by lazy { WebSocketManager(applicationScope) }
+    val sseManager: SseManager by lazy { SseManager(applicationScope) }
 }

@@ -65,7 +65,9 @@ object ChatSessionBootstrap {
             val mapType = object : TypeToken<Map<String, Any?>>() {}.type
             val map: Map<String, Any?> = gson.fromJson(body, mapType)
                 ?: error("POST /chat/sessoes: corpo vazio")
-            return map["id"]?.toString() ?: error("POST /chat/sessoes sem id")
+            return map["id"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: map["chatId"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: error("POST /chat/sessoes sem id/chatId (resposta v3: ChatUpsertResponse)")
         }
     }
 

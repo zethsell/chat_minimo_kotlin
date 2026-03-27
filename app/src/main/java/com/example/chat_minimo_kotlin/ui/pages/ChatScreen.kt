@@ -169,7 +169,9 @@ fun ChatScreen(
                                 put("sender", userId)
                                 put("receiver", receiverId)
                                 put("content", input)
-                                put("timestamp", System.currentTimeMillis())
+                                val ts = System.currentTimeMillis()
+                                put("timestampMillis", ts)
+                                put("timestamp", ts)
                                 put("recebida", false)
                                 put("visualizada", false)
                             }
