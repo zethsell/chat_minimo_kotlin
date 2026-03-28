@@ -1,19 +1,19 @@
-package com.example.chat_minimo_kotlin
+package com.example.chat_minimo_kotlin.domain.model
 
 /**
- * Duas abas: **Ativos** (ex-antigo “aberto”) vs **Histórico** (ex-antigo “fechado”).
+ * Abas da inbox (Ativos vs histórico encerrado).
  */
 enum class ChatInboxTab {
-    /** `ABERTO`, `AGUARDANDO` e qualquer status que não seja encerrado. */
     ATIVOS,
-
-    /** `RESOLVIDO`, `ARQUIVADO`, `FECHADO` (legado). */
     HISTORICO,
 }
 
+/**
+ * Classificação de `status` da sessão para filtro de abas.
+ */
 object ChatStatusBuckets {
     fun isHistorico(status: String): Boolean {
-        val s = status.uppercase()
+        val s = status.trim().uppercase()
         return s == "RESOLVIDO" || s == "ARQUIVADO" || s == "FECHADO"
     }
 

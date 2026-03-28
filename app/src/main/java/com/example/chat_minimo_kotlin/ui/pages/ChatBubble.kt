@@ -18,14 +18,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.example.chat_minimo_kotlin.ChatJson
+import com.example.chat_minimo_kotlin.domain.model.ChatMessage
 
-/** Bolha alinhada ao Flutter: fundo blue[300] / grey[300], texto black87, ticks na mesma linha. */
 @Composable
 fun ChatBubble(
     text: String,
     isMine: Boolean,
-    msg: Map<String, Any?>? = null,
+    msg: ChatMessage? = null,
 ) {
     val bgMine = Color(0xFF64B5F6)
     val bgOther = Color(0xFFE0E0E0)
@@ -58,9 +57,9 @@ fun ChatBubble(
 }
 
 @Composable
-private fun DeliveryTicksIcon(msg: Map<String, Any?>) {
-    val v = ChatJson.deliveryTruthy(msg["visualizada"])
-    val r = ChatJson.deliveryTruthy(msg["recebida"])
+private fun DeliveryTicksIcon(msg: ChatMessage) {
+    val v = msg.visualizada
+    val r = msg.recebida
     val color = when {
         v -> Color(0xFF0D47A1)
         r -> Color.White.copy(alpha = 0.85f)

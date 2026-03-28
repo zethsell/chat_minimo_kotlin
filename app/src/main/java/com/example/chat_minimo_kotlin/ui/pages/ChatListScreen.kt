@@ -15,12 +15,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -31,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -40,14 +43,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.chat_minimo_kotlin.ChatInboxTab
-import com.example.chat_minimo_kotlin.ChatStatusBuckets
-import com.example.chat_minimo_kotlin.states.ChatSessionsState
-import com.example.chat_minimo_kotlin.states.ChatSummaryUi
+import com.example.chat_minimo_kotlin.domain.model.ChatInboxTab
+import com.example.chat_minimo_kotlin.domain.model.ChatStatusBuckets
+import com.example.chat_minimo_kotlin.domain.model.ChatSummary
 import java.time.Instant
-import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
 private val timeToday: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 private val timeOther: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM")
@@ -55,25 +58,78 @@ private val timeOther: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(
-    onOpenChat: (ChatSummaryUi) -> Unit,
+    chats: List<ChatSummary>,
+    onOpenChat: (ChatSummary) -> Unit,
     onRefresh: suspend () -> Unit,
-    /** Pós-LOEC: garante `chatId` (historico por idCorreios + objetos ou `POST /chat/sessoes`) e abre a conversa. */
-    onNovaConversa: suspend () -> Unit,
+    defaultIdCorreios: String = "",
+    /**
+     * Pós-LOEC: abre conversa com o cidadão [idCorreios].
+     * Vários cidadãos distintos → várias conversas; se já existir linha **ativa** com o mesmo id, abre essa.
+     */
+    onNovaConversa: suspend (idCorreios: String) -> Unit,
     novaConversaBusy: Boolean = false,
+    onLogout: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
-    val tabs = ChatInboxTab.values().toList()
+    val tabs = ChatInboxTab.entries
     val tabTitles = listOf("Ativos", "Histórico")
     var tabIndex by remember { mutableIntStateOf(0) }
     val selectedTab = tabs[tabIndex]
+    var showNovaConversaDialog by remember { mutableStateOf(false) }
+    var draftIdCorreios by remember { mutableStateOf(defaultIdCorreios) }
 
     LaunchedEffect(Unit) {
         onRefresh()
     }
 
-    val filtered = ChatSessionsState.chats
-        .filter { ChatStatusBuckets.matchesTab(it.status, selectedTab) }
-        .sortedByDescending { it.lastMillis }
+    if (showNovaConversaDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!novaConversaBusy) showNovaConversaDialog = false },
+            title = { Text("Nova conversa") },
+            text = {
+                OutlinedTextField(
+                    value = draftIdCorreios,
+                    onValueChange = { draftIdCorreios = it },
+                    label = { Text("idCorreios") },
+                    placeholder = { Text("Digite o idCorreios do cidadão") },
+                    singleLine = true,
+                    enabled = !novaConversaBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            onNovaConversa(draftIdCorreios.trim())
+                            showNovaConversaDialog = false
+                        }
+                    },
+                    enabled = !novaConversaBusy && draftIdCorreios.isNotBlank(),
+                ) {
+                    Text("Iniciar")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showNovaConversaDialog = false },
+                    enabled = !novaConversaBusy,
+                ) {
+                    Text("Cancelar")
+                }
+            },
+        )
+    }
+
+    fun openNovaConversaDialog() {
+        draftIdCorreios = defaultIdCorreios
+        showNovaConversaDialog = true
+    }
+
+    val filtered =
+        chats
+            .filter { ChatStatusBuckets.matchesTab(it.status, selectedTab) }
+            .sortedByDescending { it.lastMillis }
 
     Scaffold(
         topBar = {
@@ -82,7 +138,7 @@ fun ChatListScreen(
                     title = { Text("Conversas") },
                     actions = {
                         TextButton(
-                            onClick = { scope.launch { onNovaConversa() } },
+                            onClick = { if (!novaConversaBusy) openNovaConversaDialog() },
                             enabled = !novaConversaBusy,
                         ) {
                             Text("Nova conversa")
@@ -90,11 +146,14 @@ fun ChatListScreen(
                         TextButton(onClick = { scope.launch { onRefresh() } }) {
                             Text("Atualizar")
                         }
+                        TextButton(onClick = onLogout) {
+                            Text("Sair")
+                        }
                     },
                 )
                 TabRow(selectedTabIndex = tabIndex) {
                     tabs.forEachIndexed { i, tab ->
-                        val count = ChatSessionsState.chats.count {
+                        val count = chats.count {
                             ChatStatusBuckets.matchesTab(it.status, tab)
                         }
                         Tab(
@@ -120,7 +179,7 @@ fun ChatListScreen(
                 },
                 onClick = {
                     if (!novaConversaBusy) {
-                        scope.launch { onNovaConversa() }
+                        openNovaConversaDialog()
                     }
                 },
                 expanded = true,
@@ -155,7 +214,7 @@ fun ChatListScreen(
 }
 
 @Composable
-private fun ChatListRowWhatsApp(chat: ChatSummaryUi, onClick: () -> Unit) {
+private fun ChatListRowWhatsApp(chat: ChatSummary, onClick: () -> Unit) {
     val initial = chat.title.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     val timeText = formatChatTime(chat.lastMillis)
     Row(
@@ -210,7 +269,7 @@ private fun formatChatTime(millis: Long): String {
     val z = ZoneId.systemDefault()
     val instant = Instant.ofEpochMilli(millis)
     val day = instant.atZone(z).toLocalDate()
-    val today = java.time.LocalDate.now(z)
+    val today = LocalDate.now(z)
     return if (day == today) {
         timeToday.format(instant.atZone(z).toLocalTime())
     } else {

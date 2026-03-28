@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,8 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.chat_minimo_kotlin.states.ChatState
-import java.util.UUID
+import com.example.chat_minimo_kotlin.domain.model.ChatMessage
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -47,13 +47,14 @@ fun ChatScreen(
     chatId: String? = null,
     sessionLoading: Boolean = false,
     sessionError: String? = null,
-    onSendMessage: (Map<String, Any?>) -> Unit,
+    messages: List<ChatMessage>,
+    onSendMessage: (String) -> Unit,
     onBack: (() -> Unit)? = null,
+    onLogout: (() -> Unit)? = null,
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val messages = ChatState.messages
 
     val subtitle = when {
         sessionLoading -> "Abrindo sessão…"
@@ -98,6 +99,13 @@ fun ChatScreen(
                         }
                     }
                 },
+                actions = {
+                    if (onLogout != null) {
+                        TextButton(onClick = onLogout) {
+                            Text("Sair")
+                        }
+                    }
+                },
             )
         },
     ) { padding ->
@@ -117,15 +125,15 @@ fun ChatScreen(
                 itemsIndexed(
                     items = messages,
                     key = { index, msg ->
-                        msg["msgId"]?.toString() ?: "row-$index-${msg["content"]}"
+                        msg.msgId.ifEmpty { "row-$index-${msg.content}" }
                     },
                 ) { _, msg ->
-                    val sender = msg["sender"] as? String ?: "system"
-                    val text = msg["content"] as? String ?: ""
+                    val sender = msg.sender
+                    val text = msg.content
                     val isMine = sender == userId
 
-                    key(msg["msgId"], msg["recebida"], msg["visualizada"]) {
-                        if (sender == "system") {
+                    key(msg.msgId, msg.recebida, msg.visualizada) {
+                        if (msg.isSystem) {
                             Text(
                                 text = text,
                                 style = MaterialTheme.typography.bodySmall,
@@ -163,19 +171,7 @@ fun ChatScreen(
                 IconButton(
                     onClick = {
                         if (input.isNotBlank() && chatId != null) {
-                            val msg: Map<String, Any?> = buildMap {
-                                put("msgId", UUID.randomUUID().toString())
-                                put("chatId", chatId)
-                                put("sender", userId)
-                                put("receiver", receiverId)
-                                put("content", input)
-                                val ts = System.currentTimeMillis()
-                                put("timestampMillis", ts)
-                                put("timestamp", ts)
-                                put("recebida", false)
-                                put("visualizada", false)
-                            }
-                            onSendMessage(msg)
+                            onSendMessage(input)
                             input = ""
                             scrollToBottom()
                         }

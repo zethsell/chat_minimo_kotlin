@@ -1,5 +1,6 @@
-package com.example.chat_minimo_kotlin
+package com.example.chat_minimo_kotlin.data.queue
 
+import com.example.chat_minimo_kotlin.domain.model.PendingOutboundMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -28,7 +29,7 @@ class ChatSseOutboundQueueTest {
     }
 
     private fun msg(id: String) =
-        PendingChatTextMessage(
+        PendingOutboundMessage(
             chatId = "c",
             msgId = id,
             sender = "s",
