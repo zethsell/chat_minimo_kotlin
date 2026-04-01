@@ -5,7 +5,7 @@ import com.example.chat_minimo_kotlin.core.session.AuthSessionHolder
 import com.example.chat_minimo_kotlin.data.mapper.HistoricoMapper
 import com.example.chat_minimo_kotlin.data.remote.ChatRemoteDataSource
 import com.example.chat_minimo_kotlin.domain.model.ChatMessage
-import com.example.chat_minimo_kotlin.domain.model.ChatSummary
+import com.example.chat_minimo_kotlin.domain.model.ChatDetail
 import com.example.chat_minimo_kotlin.domain.model.ChatStatusBuckets
 import com.example.chat_minimo_kotlin.domain.repository.ChatRepository
 import com.google.gson.Gson
@@ -33,7 +33,7 @@ class ChatRepositoryImpl @Inject constructor(
         myUserId: String,
         idCorreios: String?,
         carteiroId: String?,
-    ): List<ChatSummary> =
+    ): List<ChatDetail> =
         withContext(Dispatchers.IO) {
             val rows =
                 remote.fetchHistoricoRows(
@@ -42,7 +42,7 @@ class ChatRepositoryImpl @Inject constructor(
                     idCorreios,
                     carteiroId,
                 )
-            rows.map { historicoMapper.toChatSummary(it, myUserId) }
+            rows.map { historicoMapper.toChatDetail(it, myUserId) }
         }
 
     override suspend fun fetchMessages(

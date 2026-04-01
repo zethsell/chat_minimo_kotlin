@@ -1,12 +1,12 @@
 package com.example.chat_minimo_kotlin.domain.model
 
-/**
- * Resumo de sessão na inbox (carteiro), após mapeamento do histórico BFF.
- */
-data class ChatSummary(
+data class ChatDetail(
     val chatId: String,
-    val peerId: String,
-    val title: String,
+    val idCorreios: String,
+    val nomeCliente: String,
+    val nomeCarteiro: String,
+    val clientAvatar: String?,
+    val codigosObjetos: List<String>,
     val lastMessage: String,
     val lastMillis: Long,
     val unread: Int,

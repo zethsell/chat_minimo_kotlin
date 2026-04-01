@@ -45,7 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.chat_minimo_kotlin.domain.model.ChatInboxTab
 import com.example.chat_minimo_kotlin.domain.model.ChatStatusBuckets
-import com.example.chat_minimo_kotlin.domain.model.ChatSummary
+import com.example.chat_minimo_kotlin.domain.model.ChatDetail
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -58,8 +58,8 @@ private val timeOther: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(
-    chats: List<ChatSummary>,
-    onOpenChat: (ChatSummary) -> Unit,
+    chats: List<ChatDetail>,
+    onOpenChat: (ChatDetail) -> Unit,
     onRefresh: suspend () -> Unit,
     defaultIdCorreios: String = "",
     /**
@@ -213,9 +213,13 @@ fun ChatListScreen(
     }
 }
 
+private fun chatListDisplayTitle(chat: ChatDetail): String =
+    chat.nomeCliente.ifBlank { chat.idCorreios }.ifBlank { chat.chatId.take(8) }
+
 @Composable
-private fun ChatListRowWhatsApp(chat: ChatSummary, onClick: () -> Unit) {
-    val initial = chat.title.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+private fun ChatListRowWhatsApp(chat: ChatDetail, onClick: () -> Unit) {
+    val title = chatListDisplayTitle(chat)
+    val initial = title.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     val timeText = formatChatTime(chat.lastMillis)
     Row(
         modifier = Modifier
@@ -236,7 +240,7 @@ private fun ChatListRowWhatsApp(chat: ChatSummary, onClick: () -> Unit) {
         Spacer(modifier = Modifier.size(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                chat.title,
+                title,
                 style = if (chat.unread > 0) {
                     MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 } else {

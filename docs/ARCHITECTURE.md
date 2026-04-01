@@ -6,12 +6,12 @@ App demo **carteiro** contra o **BFF** (REST `/chat/...`, login `POST /v1/autent
 
 | Camada | Pacote (raiz `com.example.chat_minimo_kotlin`) | Responsabilidade |
 |--------|-----------------------------------------------|------------------|
-| **Domain** | `domain.model`, `domain.repository`, `domain.service`, `domain.realtime` | Entidades (`ChatSummary`, `ChatMessage`, …), interfaces de repositório, regras puras (merge de mensagens, preview da inbox), constantes do protocolo SSE/WS. |
+| **Domain** | `domain.model`, `domain.repository`, `domain.service`, `domain.realtime` | Entidades (`ChatDetail`, `ChatMessage`, …), interfaces de repositório, regras puras (merge de mensagens, preview da inbox), constantes do protocolo SSE/WS. |
 | **Data** | `data.dto`, `data.mapper`, `data.remote` (+ `data.remote.api`), `data.repository`, `data.sse`, `data.queue`, `data.json` | DTOs Gson, mapeamento DTO → domínio, **Retrofit** (`BffChatApi`, `BffAuthApi`) sobre OkHttp, implementações de repositório, parser SSE → `ParsedRealtimeEvent`, fila outbound. |
 | **Presentation** | `presentation.chat` | `ChatViewModel` (`@HiltViewModel`): `StateFlow` de lista e thread, transporte SSE, orquestração de casos de uso. |
 | **Core** | `core.config`, `core.session` | `ChatAppConfig` (defaults de `strings.xml`), `AuthSessionHolder` (cookie + usuário + base BFF, persistido via `ChatTokenStore`). |
 | **DI** | `di` | Hilt: `NetworkModule`, `CoroutineModule`, `RepositoryModule`, interceptador de cookie. |
-| **UI** | `ui.pages`, `ui.components`, `ui.theme` | Compose: apenas modelos de domínio (`ChatSummary`, `ChatMessage`) e callbacks; sem parsing JSON. |
+| **UI** | `ui.pages`, `ui.components`, `ui.theme` | Compose: apenas modelos de domínio (`ChatDetail`, `ChatMessage`) e callbacks; sem parsing JSON. |
 
 ## Fluxo de dados
 

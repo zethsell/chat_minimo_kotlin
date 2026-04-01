@@ -1,7 +1,7 @@
 package com.example.chat_minimo_kotlin.domain.repository
 
 import com.example.chat_minimo_kotlin.domain.model.ChatMessage
-import com.example.chat_minimo_kotlin.domain.model.ChatSummary
+import com.example.chat_minimo_kotlin.domain.model.ChatDetail
 
 /**
  * Acesso REST ao domínio de chat no BFF (histórico, mensagens, mutações, bootstrap de sessão).
@@ -12,7 +12,7 @@ interface ChatRepository {
         myUserId: String,
         idCorreios: String? = null,
         carteiroId: String? = null,
-    ): List<ChatSummary>
+    ): List<ChatDetail>
 
     suspend fun fetchMessages(
         chatId: String,

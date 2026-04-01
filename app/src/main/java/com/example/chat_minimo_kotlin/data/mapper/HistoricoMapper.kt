@@ -1,7 +1,7 @@
 package com.example.chat_minimo_kotlin.data.mapper
 
 import com.example.chat_minimo_kotlin.data.dto.HistoricoChatRowDto
-import com.example.chat_minimo_kotlin.domain.model.ChatSummary
+import com.example.chat_minimo_kotlin.domain.model.ChatDetail
 import com.example.chat_minimo_kotlin.domain.service.ChatListPreviewFormatter
 import com.example.chat_minimo_kotlin.domain.service.ChatSummarySourceRow
 import com.google.gson.JsonArray
@@ -34,10 +34,12 @@ class HistoricoMapper @Inject constructor(
         return emptyList()
     }
 
-    fun toChatSummary(row: HistoricoChatRowDto, myUserId: String): ChatSummary {
+    fun toChatDetail(row: HistoricoChatRowDto, myUserId: String): ChatDetail {
         val chatId = (row.id ?: row.chatId)?.trim().orEmpty()
         val status = row.status?.trim().orEmpty().ifEmpty { "ABERTO" }
-        val lastMillis = row.lastMessageMillis?.toLong() ?: 0L
+        val lastMillis = row.lastMessageMillis?.toLong()
+            ?: row.lastMillisRoot?.toLong()
+            ?: 0L
         val source =
             ChatSummarySourceRow(
                 lastInboundFromCitizen = row.lastInboundFromCitizen.orEmpty(),
@@ -46,29 +48,45 @@ class HistoricoMapper @Inject constructor(
             )
         val lastMsg = previewFormatter.previewFromHistoricoRow(source, myUserId)
         val unread = unreadForUser(row.unreadCount, myUserId)
-        val idC = row.detalhes?.idCorreios?.trim()?.takeIf { it.isNotEmpty() }
-            ?: row.idCorreiosRoot?.trim()?.takeIf { it.isNotEmpty() }
-        val cart = row.detalhes?.carteiroId?.trim()?.takeIf { it.isNotEmpty() }
-        val peerId =
+        val det = row.detalhes
+        val idC =
+            det?.idCorreios?.trim()?.takeIf { it.isNotEmpty() }
+                ?: row.idCorreiosRoot?.trim()?.takeIf { it.isNotEmpty() }
+                ?: ""
+        val cart = det?.carteiroId?.trim()?.takeIf { it.isNotEmpty() }
+        val idCorreios =
             when {
-                idC != null && idC != myUserId -> idC
+                idC.isNotEmpty() && idC != myUserId -> idC
                 cart != null && cart != myUserId -> cart
-                idC != null -> idC
+                idC.isNotEmpty() -> idC
                 cart != null -> cart
                 else -> ""
             }
-        val title =
-            when {
-                idC != null && idC != myUserId -> idC
-                cart != null && cart != myUserId -> cart
-                idC != null -> idC
-                cart != null -> cart
-                else -> chatId.take(8)
-            }
-        return ChatSummary(
+        val nomeCliente =
+            det?.nomeCliente?.trim()?.takeIf { it.isNotEmpty() }
+                ?: det?.nomeCidadao?.trim()?.takeIf { it.isNotEmpty() }
+                ?: row.nomeClienteRoot?.trim()?.takeIf { it.isNotEmpty() }
+                ?: idCorreios
+        val nomeCarteiro =
+            det?.nomeCarteiro?.trim()?.takeIf { it.isNotEmpty() }
+                ?: row.nomeCarteiroRoot?.trim()?.takeIf { it.isNotEmpty() }
+                ?: cart.orEmpty()
+        val avatar =
+            det?.clientAvatar?.trim()?.takeIf { it.isNotEmpty() }
+                ?: det?.avatarUrl?.trim()?.takeIf { it.isNotEmpty() }
+                ?: row.clientAvatarRoot?.trim()?.takeIf { it.isNotEmpty() }
+        val codigos =
+            row.codigosObjetos?.filter { it.isNotBlank() }
+                ?: row.codigosObjeto?.filter { it.isNotBlank() }
+                ?: det?.codigosObjeto?.filter { it.isNotBlank() }
+                ?: emptyList()
+        return ChatDetail(
             chatId = chatId,
-            peerId = peerId,
-            title = title,
+            idCorreios = idCorreios,
+            nomeCliente = nomeCliente.ifBlank { idCorreios.ifBlank { chatId.take(8) } },
+            nomeCarteiro = nomeCarteiro,
+            clientAvatar = avatar,
+            codigosObjetos = codigos,
             lastMessage = lastMsg,
             lastMillis = lastMillis,
             unread = unread,

@@ -10,7 +10,7 @@ import com.example.chat_minimo_kotlin.data.sse.RealtimeSseParser
 import com.example.chat_minimo_kotlin.data.sse.SseManager
 import com.example.chat_minimo_kotlin.domain.model.ChatMessage
 import com.example.chat_minimo_kotlin.domain.model.ChatStatusBuckets
-import com.example.chat_minimo_kotlin.domain.model.ChatSummary
+import com.example.chat_minimo_kotlin.domain.model.ChatDetail
 import com.example.chat_minimo_kotlin.domain.model.OutgoingChatText
 import com.example.chat_minimo_kotlin.domain.model.PendingOutboundMessage
 import com.example.chat_minimo_kotlin.domain.realtime.ChatSessionUpdate
@@ -42,8 +42,8 @@ class ChatViewModel @Inject constructor(
     private val realtimeParser: RealtimeSseParser,
 ) : AndroidViewModel(application) {
 
-    private val _chats = MutableStateFlow<List<ChatSummary>>(emptyList())
-    val chats: StateFlow<List<ChatSummary>> = _chats.asStateFlow()
+    private val _chats = MutableStateFlow<List<ChatDetail>>(emptyList())
+    val chats: StateFlow<List<ChatDetail>> = _chats.asStateFlow()
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -63,12 +63,15 @@ class ChatViewModel @Inject constructor(
 
     private fun codigosObjeto(): List<String> = appConfig.demoCodigosObjeto
 
+    /** Códigos de objeto demo (ex.: nova conversa até o próximo refresh do histórico). */
+    val demoCodigosObjeto: List<String> get() = appConfig.demoCodigosObjeto
+
     private fun bffBase(): String {
         val u = session.bffApiBaseUrl?.trim()?.trimEnd('/')
         return if (!u.isNullOrEmpty()) u else appConfig.defaultBffBaseUrl
     }
 
-    fun findActiveChatForCitizen(idCorreios: String): ChatSummary? {
+    fun findActiveChatForCitizen(idCorreios: String): ChatDetail? {
         val want = idCorreios.trim()
         if (want.isEmpty()) return null
         return _chats.value.find { s ->
@@ -76,16 +79,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun peerMatchesCitizen(s: ChatSummary, idCorreios: String): Boolean {
-        val p = s.peerId.trim()
-        val t = s.title.trim()
-        if (p.isNotEmpty() && (p == idCorreios || p.equals(idCorreios, ignoreCase = true))) {
-            return true
-        }
-        if (t.isNotEmpty() && (t == idCorreios || t.equals(idCorreios, ignoreCase = true))) {
-            return true
-        }
-        return false
+    private fun peerMatchesCitizen(s: ChatDetail, idCorreios: String): Boolean {
+        val id = s.idCorreios.trim()
+        return id.isNotEmpty() &&
+            (id == idCorreios || id.equals(idCorreios, ignoreCase = true))
     }
 
     fun prepareForLogout() {
@@ -366,10 +363,13 @@ class ChatViewModel @Inject constructor(
                     )
             } else {
                 current.add(
-                    ChatSummary(
+                    ChatDetail(
                         chatId = chatId,
-                        peerId = "",
-                        title = chatId.take(8),
+                        idCorreios = "",
+                        nomeCliente = chatId.take(8),
+                        nomeCarteiro = "",
+                        clientAvatar = null,
+                        codigosObjetos = emptyList(),
                         lastMessage = listPreview,
                         lastMillis = lm,
                         unread = urResolved ?: 0,

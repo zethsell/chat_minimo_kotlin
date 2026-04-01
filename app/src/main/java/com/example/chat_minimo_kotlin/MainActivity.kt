@@ -16,7 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.chat_minimo_kotlin.core.session.AuthSessionHolder
-import com.example.chat_minimo_kotlin.domain.model.ChatSummary
+import com.example.chat_minimo_kotlin.domain.model.ChatDetail
 import com.example.chat_minimo_kotlin.domain.model.OutgoingChatText
 import com.example.chat_minimo_kotlin.domain.repository.AuthRepository
 import com.example.chat_minimo_kotlin.presentation.chat.ChatViewModel
@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
                     return@Box
                 }
 
-                var selected by remember { mutableStateOf<ChatSummary?>(null) }
+                var selected by remember { mutableStateOf<ChatDetail?>(null) }
                 var novaBusy by remember { mutableStateOf(false) }
 
                 val openChatId = selected?.chatId
@@ -90,11 +90,11 @@ class MainActivity : ComponentActivity() {
                     val chats by viewModel.chats.collectAsStateWithLifecycle()
                     ChatListScreen(
                         chats = chats,
-                        onOpenChat = { summary ->
-                            viewModel.activeChatId = summary.chatId
-                            selected = summary
+                        onOpenChat = { detail ->
+                            viewModel.activeChatId = detail.chatId
+                            selected = detail
                             scope.launch {
-                                viewModel.loadMessagesForChat(summary.chatId)
+                                viewModel.loadMessagesForChat(detail.chatId)
                             }
                         },
                         onRefresh = {
@@ -120,10 +120,13 @@ class MainActivity : ComponentActivity() {
                                 val chatId = viewModel.bootstrapNewChatId(peer)
                                 viewModel.activeChatId = chatId
                                 selected =
-                                    ChatSummary(
+                                    ChatDetail(
                                         chatId = chatId,
-                                        peerId = peer,
-                                        title = peer,
+                                        idCorreios = peer,
+                                        nomeCliente = peer,
+                                        nomeCarteiro = viewModel.userId,
+                                        clientAvatar = null,
+                                        codigosObjetos = viewModel.demoCodigosObjeto,
                                         lastMessage = "",
                                         lastMillis = System.currentTimeMillis(),
                                         unread = 0,
@@ -152,7 +155,7 @@ class MainActivity : ComponentActivity() {
                     val messages by viewModel.messages.collectAsStateWithLifecycle()
                     ChatScreen(
                         userId = viewModel.userId,
-                        receiverId = sel.peerId,
+                        receiverId = sel.idCorreios,
                         chatId = sel.chatId,
                         sessionLoading = false,
                         sessionError = null,
@@ -161,7 +164,7 @@ class MainActivity : ComponentActivity() {
                             viewModel.sendMessage(
                                 OutgoingChatText(
                                     chatId = sel.chatId,
-                                    receiverId = sel.peerId,
+                                    receiverId = sel.idCorreios,
                                     content = content,
                                 ),
                             )
